@@ -1,4 +1,4 @@
-from src.data_generator import TwoAFCGenerator
+from src.data_generator import TwoAFCGenerator, TwoAFCGeneratorWithFixedPoints
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,7 +20,7 @@ def compute_psychometric_curve(stim1, stim2, model_outputs, n_bins=10):
         model_outputs: tensor of predicted class per trial (0 or 1)
         n_bins: number of bins to group stim differences
     """
-    stim_diff = (stim2 - stim1).detach().cpu().numpy()
+    stim_diff = (stim2 - stim1).detach().numpy()
     choices = model_outputs.detach().cpu().numpy()
 
     bin_means, bin_edges, _ = binned_statistic(stim_diff, choices, statistic='mean', bins=n_bins)
@@ -62,7 +62,7 @@ def plot_psychometric_curve(trained_model):
     inputs, targets = gen()
 
     with (torch.no_grad()):
-        outputs = trained_model(inputs)           # [seq_len, batch, num_classes]
+        outputs, _ = trained_model(inputs)           # [seq_len, batch, num_classes]
         final_outputs = outputs[-1]       # use final timestep
         pred = torch.argmax(final_outputs, dim=1)  # [batch] — predicted class index
 
@@ -72,7 +72,7 @@ def plot_psychometric_curve(trained_model):
 
     return
 
-def plot_learning_curves(train_losses, train_accs, val_losses=None, val_accs=None):
+def plot_learning_curves(train_losses):
     """
     Plots training (and optionally validation) loss and accuracy curves.
 
@@ -87,8 +87,6 @@ def plot_learning_curves(train_losses, train_accs, val_losses=None, val_accs=Non
     # Loss curve
     plt.figure()
     plt.plot(steps, train_losses, label="Train Loss")
-    if val_losses is not None:
-        plt.plot(steps, val_losses, label="Val Loss")
     plt.xlabel("Logging Step")
     plt.ylabel("Cross‐Entropy Loss")
     plt.yscale('log')
@@ -96,14 +94,3 @@ def plot_learning_curves(train_losses, train_accs, val_losses=None, val_accs=Non
     plt.legend()
     plt.show()
 
-    # # Accuracy curve
-    # plt.figure()
-    # plt.plot(steps, [a * 100 for a in train_accs], label="Train Acc")
-    # if val_accs is not None:
-    #     plt.plot(steps, [a * 100 for a in val_accs], label="Val Acc")
-    # plt.xlabel("Epoch")
-    # plt.ylabel("Accuracy (%)")
-    # # plt.yscale('log')
-    # plt.title("Accuracy Curve")
-    # plt.legend()
-    # plt.show()

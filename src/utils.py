@@ -23,7 +23,7 @@ def plot_two_afc_batches(generator, num_trials=3):
         x_plot = np.concatenate([xi, target_L[:, None], target_R[:, None]], axis=1).T
 
         fig, ax1 = plt.subplots(figsize=(8, 4))
-        im = ax1.imshow(x_plot, aspect='auto', interpolation='nearest', cmap='viridis')
+        im = ax1.imshow(x_plot, aspect='auto', interpolation='nearest', cmap='viridis', vmin=-1, vmax=1)
 
         ax1.set_yticks([0, 1, 2, 3, 4])
         ax1.set_yticklabels(['Fixation', 'Stim L', 'Stim R', 'Target L (-1)', 'Target R (1)'])
@@ -31,7 +31,9 @@ def plot_two_afc_batches(generator, num_trials=3):
         ax1.set_xlabel('Time step')
         ax1.set_title(f'Trial {idx + 1}: Inputs and Target')
 
-        plt.colorbar(im, ax=ax1, orientation='vertical', label='Value')
+
+        cbar = plt.colorbar(im, ax=ax1, orientation='vertical', label='Value')
+        # cbar.set_clim(-1, 1)
         plt.tight_layout()
         plt.show()
 

@@ -7,21 +7,29 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
+from fixed_point_finder.plot_utils import plot_fps
+
+
 def run_trial_and_collect_states(model, inputs):
     with torch.no_grad():
         seq_len, _ = inputs.size()
         h = torch.zeros(1, model.hidden_size, device=inputs.device)
         states = []
         for t in range(seq_len):
-            x_t = inputs[t:t + 1]
-            h = (1 - model.alpha) * h + model.alpha * (
-                torch.relu(h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec)
-            )
+            # x_t = inputs[t:t + 1]
+            # h = (1 - model.alpha) * h + model.alpha * (
+            #     torch.relu(h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec)
+            # )
+
+            x_t = inputs[t]
+            u_t = h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec
+            h = (1 - model.alpha) * h + model.alpha * u_t
+            h = torch.relu(h)
             states.append(h.squeeze(0).cpu().numpy())
     return np.stack(states)
 
 
-def plot_pca_trajectories(model, data_gen, n_trials=5, n_components=2):
+def plot_pca_trajectories(model, inputs, targets, n_trials=5, n_components=2, fp = None):
     """
     Plots PCA of hidden states with color coded by choice and correctness.
     """
@@ -31,11 +39,10 @@ def plot_pca_trajectories(model, data_gen, n_trials=5, n_components=2):
     legend_tracker = set()
     correct_flags = []
 
-    inputs, targets = data_gen()
     targets = targets[-1]  # assume final timestep contains decision target
 
     with torch.no_grad():
-        outputs = model(inputs)
+        outputs, _ = model(inputs)
         preds = torch.argmax(outputs[-1], dim=1)  # shape: [batch]
 
     for i in range(n_trials):
@@ -81,6 +88,10 @@ def plot_pca_trajectories(model, data_gen, n_trials=5, n_components=2):
             #         label=f'Trial {i} | Ch {choice} | {"✓" if correct else "✗"}')
             ax.plot(coords[:, 0], coords[:, 1], color=color, label = label)
 
+    if not fp is None:
+        fixedpoints = plot_fixed_point(fp, pca)
+        ax.scatter(fixedpoints[:, 0], fixedpoints[:, 1])
+
 
     ax.set_xlabel("PC1")
     ax.set_ylabel("PC2")
@@ -90,6 +101,8 @@ def plot_pca_trajectories(model, data_gen, n_trials=5, n_components=2):
     ax.legend(loc='best', fontsize=8)
     plt.tight_layout()
     plt.show()
+
+    return pca
 
 
 def extract_states_and_labels(model, data_gen, n_batches=50):
@@ -104,10 +117,15 @@ def extract_states_and_labels(model, data_gen, n_batches=50):
 
         h = torch.zeros(inputs.shape[1], model.hidden_size, device=device)
         for t in range(seq_len):
+            # x_t = inputs[t]
+            # h = (1 - model.alpha) * h + model.alpha * (
+            #     torch.relu(h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec)
+            # )
+
             x_t = inputs[t]
-            h = (1 - model.alpha) * h + model.alpha * (
-                torch.relu(h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec)
-            )
+            u_t = h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec
+            h = (1 - model.alpha) * h + model.alpha * u_t
+            h = torch.relu(h)
         X_list.append(h.detach().cpu().numpy())
         y_list.append(targets[-1].cpu().numpy())
 
@@ -137,10 +155,16 @@ def decode_over_time(model, data_gen, n_batches=50):
         hidden_traj = []
 
         for t in range(seq_len):
+            # x_t = inputs[t]
+            # h = (1 - model.alpha) * h + model.alpha * (
+            #     torch.relu(h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec)
+            # )
+
             x_t = inputs[t]
-            h = (1 - model.alpha) * h + model.alpha * (
-                torch.relu(h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec)
-            )
+            u_t = h @ model.W_rec.t() + x_t @ model.W_in + model.b_rec
+            h = (1 - model.alpha) * h + model.alpha * u_t
+            h = torch.relu(h)
+
             hidden_traj.append(h.detach().cpu().numpy())  # shape [batch, hidden]
 
         hidden_traj = np.stack(hidden_traj, axis=0).transpose(1, 0, 2)  # [batch, seq_len, hidden]
@@ -208,5 +232,119 @@ def decode_choice(model, data_gen):
     # Plot confusion matrix
     plot_confusion_matrix(y, clf.predict(X), class_names=["Left", "Right"])
     accuracies = decode_over_time(model, data_gen, n_batches=10)
-    plot_decoding_accuracy_over_time(accuracies, timepoints=range(len(accuracies)))
+    plot_decoding_accuracy_over_time(accuracies, timepoints=range(1,len(accuracies)+1))
     return weights
+
+def plot_fixed_point(fp, pca,
+    scale=1.0,
+    max_n_modes=3,
+    do_plot_unstable_fps=True,
+    do_plot_stable_modes=False, # (for unstable FPs)
+    stable_color='k',
+    stable_marker='.',
+    unstable_color='r',
+    unstable_marker=None):
+    '''Plots a single fixed point and its dominant eigenmodes.
+
+    Args:
+        ax: Matplotlib figure axis on which to plot everything.
+
+        fp: a FixedPoints object containing a single fixed point
+        (i.e., fp.n == 1),
+
+        pca: PCA object as returned by sklearn.decomposition.PCA. This
+        is used to transform the high-d state space representations
+        into 3-d for visualization.
+
+        scale (optional): Scale factor for stretching (>1) or shrinking
+        (<1) lines representing eigenmodes of the Jacobian. Default:
+        1.0 (unity).
+
+        max_n_modes (optional): Maximum number of eigenmodes to plot.
+        Default: 3.
+
+        do_plot_stable_modes (optional): bool indicating whether or
+        not to plot lines representing stable modes (i.e.,
+        eigenvectors of the Jacobian whose eigenvalue magnitude is
+        less than one).
+
+    Returns:
+        None.
+    '''
+
+    xstar = fp.xstar
+    J = fp.J_xstar
+    n_states = fp.n_states
+
+    has_J = J is not None
+
+    if has_J:
+
+        if not fp.has_decomposed_jacobians:
+            ''' Ideally, never wind up here. Eigen decomposition is much faster in batch mode.'''
+            print('Decomposing Jacobians, one fixed point at time.')
+            print('\t warning: THIS CAN BE VERY SLOW.')
+            fp.decompose_Jacobians()
+
+        e_vals = fp.eigval_J_xstar[0]
+        e_vecs = fp.eigvec_J_xstar[0]
+
+        sorted_e_val_idx = np.argsort(np.abs(e_vals))
+
+        if max_n_modes > n_states:
+            max_n_modes = n_states
+
+        # Determine stability of fixed points
+        is_stable = np.all(np.abs(e_vals) < 1.0)
+
+        if is_stable:
+            color = stable_color
+            marker = stable_marker
+        else:
+            color = unstable_color
+            marker = unstable_marker
+    else:
+        color = stable_color
+        marker = stable_marker
+
+    do_plot = (not has_J) or is_stable or do_plot_unstable_fps
+
+    if do_plot:
+        if has_J:
+            for mode_idx in range(max_n_modes):
+                # -[1, 2, ..., max_n_modes]
+                idx = sorted_e_val_idx[-(mode_idx+1)]
+
+                # Magnitude of complex eigenvalue
+                e_val_mag = np.abs(e_vals[idx])
+
+                if e_val_mag > 1.0 or do_plot_stable_modes:
+
+                    # Already real. Cast to avoid warning.
+                    e_vec = np.real(e_vecs[:,idx])
+
+                    # [1 x d] numpy arrays
+                    xstar_plus = xstar + scale*e_val_mag*e_vec
+                    xstar_minus = xstar - scale*e_val_mag*e_vec
+
+                    # [3 x d] numpy array
+                    xstar_mode = np.vstack((xstar_minus, xstar, xstar_plus))
+
+                    if e_val_mag < 1.0:
+                        color = stable_color
+                    else:
+                        color = unstable_color
+
+                    if n_states >= 3 and pca is not None:
+                        # [3 x 3] numpy array
+                        zstar = pca.transform(xstar_mode)
+                    else:
+                        zstar = xstar_mode
+
+        if n_states >= 3 and pca is not None:
+            zstar = pca.transform(xstar)
+        else:
+            zstar = xstar
+
+
+    return zstar

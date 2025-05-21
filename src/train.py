@@ -13,14 +13,14 @@ def train_model(lr = 1e-3, num_epochs = 2000):
     steps = num_epochs
 
     model = CTRNN(input_size, hidden_size, output_size)
-    optimizer = optim.Adam(model.parameters(), lr=lr, amsgrad=True)
+    optimizer = optim.Adam(model.parameters(), lr=lr, amsgrad=False)
     criterion = nn.CrossEntropyLoss()
-    data_gen = TwoAFCGenerator(batch_size = 32,
+    data_gen = TwoAFCGenerator(batch_size = 40,
         fix_dur = 10,
         stim_dur = 20,
-        delay_dur = 0,
-        decision_dur = 10,
-        min_diff= 0.1,
+        delay_dur = 5,
+        decision_dur = 2,
+        min_diff= 0.2,
         max_diff= 0.6,
         noise_level= 0.2)
 
@@ -34,7 +34,7 @@ def train_model(lr = 1e-3, num_epochs = 2000):
         inputs, targets = data_gen()
         targets[targets == -1] = 0
         inputs, targets = inputs.to(device), targets.to(device)
-        logits = model(inputs)  # seq_len × batch × output
+        logits, _ = model(inputs)  # seq_len × batch × output
         # Compute loss only on decision period
         logits_dec = logits[data_gen.seq_len - data_gen.decision_dur:]
         targ_dec   = targets[data_gen.seq_len- data_gen.decision_dur:]
@@ -43,6 +43,9 @@ def train_model(lr = 1e-3, num_epochs = 2000):
         epoch_loss.append(loss.item())
         optimizer.zero_grad()
         loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
+
         optimizer.step()
 
         with torch.no_grad():
