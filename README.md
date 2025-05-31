@@ -3,6 +3,6 @@
 Trains a continuous time RNN on a 2AFC perceptual decision making task. It then plots a psychometric curve. It then performs PCA on the hidden state, logistic regression decoding of choices and finds the fixed points using fixed-point-finder. It also performs decoding over time during the evidence accumulation and decision phase of the task.
 
 
-There are 2 notebooks: \
-1. Visualization - to see the task   \
+There are 2 notebooks: 
+1. Visualization - to see the task   
 2. Analysis - To train and analyse the network
